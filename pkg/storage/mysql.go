@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -106,6 +107,13 @@ func (s *MysqlDB) RemoveJob(jobName string) error {
 	if err != nil {
 		return xerror.Wrapf(err, xerror.DB, "mysql: remove job begin transaction failed, name: %s", jobName)
 	}
+
+	defer func() {
+		if err != nil {
+			log.Errorf("rebalance load failed and rollback, err: %v", err)
+			_ = txn.Rollback()
+		}
+	}()
 
 	if _, err := txn.Exec(fmt.Sprintf("DELETE FROM jobs WHERE job_name = '%s'", jobName)); err != nil {
 		if err := txn.Rollback(); err != nil {
@@ -227,6 +235,13 @@ func (s *MysqlDB) GetStampAndJobs(hostInfo string) (int64, []string, error) {
 		return -1, nil, xerror.Wrapf(err, xerror.DB, "mysql: begin IMMEDIATE transaction failed.")
 	}
 
+	defer func() {
+		if err != nil {
+			log.Errorf("rebalance load failed and rollback, err: %v", err)
+			_ = txn.Rollback()
+		}
+	}()
+
 	var timestamp int64
 	if err := txn.QueryRow(fmt.Sprintf("SELECT timestamp FROM syncers WHERE host_info = '%s'", hostInfo)).Scan(&timestamp); err != nil {
 		return -1, nil, xerror.Wrapf(err, xerror.DB, "mysql: get stamp failed.")
@@ -341,6 +356,13 @@ func (s *MysqlDB) RebalanceLoadFromDeadSyncers(syncers []string) error {
 	if err != nil {
 		return xerror.Wrap(err, xerror.DB, "mysql: rebalance load begin txn failed")
 	}
+
+	defer func() {
+		if err != nil {
+			log.Errorf("rebalance load failed and rollback, err: %v", err)
+			_ = txn.Rollback()
+		}
+	}()
 
 	orphanJobs, err := s.getOrphanJobs(txn, syncers)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -84,6 +85,13 @@ func (s *SQLiteDB) RemoveJob(jobName string) error {
 	if err != nil {
 		return xerror.Wrapf(err, xerror.DB, "sqlite: remove job begin transaction failed, name: %s", jobName)
 	}
+
+	defer func() {
+		if err != nil {
+			log.Errorf("rebalance load failed and rollback, err: %v", err)
+			_ = txn.Rollback()
+		}
+	}()
 
 	if _, err := txn.Exec("DELETE FROM jobs WHERE job_name = ?", jobName); err != nil {
 		if err := txn.Rollback(); err != nil {
@@ -197,6 +205,13 @@ func (s *SQLiteDB) GetStampAndJobs(hostInfo string) (int64, []string, error) {
 		return -1, nil, xerror.Wrap(err, xerror.DB, "sqlite: begin IMMEDIATE transaction failed.")
 	}
 
+	defer func() {
+		if err != nil {
+			log.Errorf("rebalance load failed and rollback, err: %v", err)
+			_ = txn.Rollback()
+		}
+	}()
+
 	var timestamp int64
 	if err := txn.QueryRow("SELECT timestamp FROM syncers WHERE host_info = ?", hostInfo).Scan(&timestamp); err != nil {
 		return -1, nil, xerror.Wrap(err, xerror.DB, "sqlite: get stamp failed.")
@@ -308,6 +323,13 @@ func (s *SQLiteDB) RebalanceLoadFromDeadSyncers(syncers []string) error {
 	if err != nil {
 		return xerror.Wrap(err, xerror.DB, "sqlite: rebalance load begin txn failed")
 	}
+
+	defer func() {
+		if err != nil {
+			log.Errorf("rebalance load failed and rollback, err: %v", err)
+			_ = txn.Rollback()
+		}
+	}()
 
 	orphanJobs, err := s.getOrphanJobs(txn, syncers)
 	if err != nil {
