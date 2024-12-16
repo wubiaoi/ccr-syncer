@@ -196,7 +196,7 @@ if [[ "${RUN_DAEMON}" -eq 1 ]]; then
           "$@" >>"${LOG_DIR}" 2>&1 </dev/null &
     echo $! > ${pidfile}
 else
-    exec "${SYNCER_HOME}/bin/ccr_syncer" \
+    "${SYNCER_HOME}/bin/ccr_syncer" \
         "-db_dir=${DB_DIR}" \
         "-db_type=${DB_TYPE}" \
         "-db_host=${DB_HOST}" \

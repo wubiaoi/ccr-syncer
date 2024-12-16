@@ -78,7 +78,9 @@ func (s *SQLiteDB) UpdateJob(jobName string, jobInfo string) error {
 }
 
 func (s *SQLiteDB) RemoveJob(jobName string) error {
-	txn, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+	var err error
+	var txn *sql.Tx
+	txn, err = s.db.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  false,
 	})
@@ -93,21 +95,15 @@ func (s *SQLiteDB) RemoveJob(jobName string) error {
 		}
 	}()
 
-	if _, err := txn.Exec("DELETE FROM jobs WHERE job_name = ?", jobName); err != nil {
-		if err := txn.Rollback(); err != nil {
-			return xerror.Wrapf(err, xerror.DB, "sqlite: remove job failed, name: %s, and rollback failed too", jobName)
-		}
+	if _, err = txn.Exec("DELETE FROM jobs WHERE job_name = ?", jobName); err != nil {
 		return xerror.Wrapf(err, xerror.DB, "sqlite: remove job failed, name: %s", jobName)
 	}
 
-	if _, err := txn.Exec("DELETE FROM progresses WHERE job_name = ?", jobName); err != nil {
-		if err := txn.Rollback(); err != nil {
-			return xerror.Wrapf(err, xerror.DB, "sqlite: remove progresses failed, name: %s, and rollback failed too", jobName)
-		}
+	if _, err = txn.Exec("DELETE FROM progresses WHERE job_name = ?", jobName); err != nil {
 		return xerror.Wrapf(err, xerror.DB, "sqlite: remove progresses failed, name: %s", jobName)
 	}
 
-	if err := txn.Commit(); err != nil {
+	if err = txn.Commit(); err != nil {
 		return xerror.Wrap(err, xerror.DB, "sqlite: remove job txn commit failed.")
 	}
 
@@ -197,7 +193,9 @@ func (s *SQLiteDB) RefreshSyncer(hostInfo string, lastStamp int64) (int64, error
 }
 
 func (s *SQLiteDB) GetStampAndJobs(hostInfo string) (int64, []string, error) {
-	txn, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+	var err error
+	var txn *sql.Tx
+	txn, err = s.db.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
 	})
@@ -213,12 +211,13 @@ func (s *SQLiteDB) GetStampAndJobs(hostInfo string) (int64, []string, error) {
 	}()
 
 	var timestamp int64
-	if err := txn.QueryRow("SELECT timestamp FROM syncers WHERE host_info = ?", hostInfo).Scan(&timestamp); err != nil {
+	if err = txn.QueryRow("SELECT timestamp FROM syncers WHERE host_info = ?", hostInfo).Scan(&timestamp); err != nil {
 		return -1, nil, xerror.Wrap(err, xerror.DB, "sqlite: get stamp failed.")
 	}
 
 	jobs := make([]string, 0)
-	rows, err := s.db.Query("SELECT job_name FROM jobs WHERE belong_to = ?", hostInfo)
+	var rows *sql.Rows
+	rows, err = s.db.Query("SELECT job_name FROM jobs WHERE belong_to = ?", hostInfo)
 	if err != nil {
 		return -1, nil, xerror.Wrap(err, xerror.DB, "sqlite: get job_nums failed.")
 	}
@@ -226,13 +225,13 @@ func (s *SQLiteDB) GetStampAndJobs(hostInfo string) (int64, []string, error) {
 
 	for rows.Next() {
 		var jobName string
-		if err := rows.Scan(&jobName); err != nil {
+		if err = rows.Scan(&jobName); err != nil {
 			return -1, nil, xerror.Wrap(err, xerror.DB, "sqlite: scan job_name failed.")
 		}
 		jobs = append(jobs, jobName)
 	}
 
-	if err := txn.Commit(); err != nil {
+	if err = txn.Commit(); err != nil {
 		return -1, nil, xerror.Wrap(err, xerror.DB, "sqlite: get jobs & stamp txn commit failed.")
 	}
 
@@ -316,7 +315,9 @@ func (s *SQLiteDB) dispatchJobs(txn *sql.Tx, hostInfo string, additionalJobs []s
 }
 
 func (s *SQLiteDB) RebalanceLoadFromDeadSyncers(syncers []string) error {
-	txn, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+	var err error
+	var txn *sql.Tx
+	txn, err = s.db.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  false,
 	})
@@ -331,13 +332,16 @@ func (s *SQLiteDB) RebalanceLoadFromDeadSyncers(syncers []string) error {
 		}
 	}()
 
-	orphanJobs, err := s.getOrphanJobs(txn, syncers)
+	var orphanJobs []string
+	orphanJobs, err = s.getOrphanJobs(txn, syncers)
 	if err != nil {
 		return err
 	}
 
 	additionalLoad := len(orphanJobs)
-	loadList, currentLoad, err := s.getLoadInfo(txn)
+	var loadList LoadSlice
+	var currentLoad int
+	loadList, currentLoad, err = s.getLoadInfo(txn)
 	if err != nil {
 		return err
 	}
@@ -348,16 +352,13 @@ func (s *SQLiteDB) RebalanceLoadFromDeadSyncers(syncers []string) error {
 	}
 	for i := range loadList {
 		beginIdx := additionalLoad - loadList[i].AddedLoad
-		if err := s.dispatchJobs(txn, loadList[i].HostInfo, orphanJobs[beginIdx:additionalLoad]); err != nil {
-			if err := txn.Rollback(); err != nil {
-				return xerror.Wrap(err, xerror.DB, "sqlite: rebalance rollback failed.")
-			}
+		if err = s.dispatchJobs(txn, loadList[i].HostInfo, orphanJobs[beginIdx:additionalLoad]); err != nil {
 			return err
 		}
 		additionalLoad = beginIdx
 	}
 
-	if err := txn.Commit(); err != nil {
+	if err = txn.Commit(); err != nil {
 		return xerror.Wrap(err, xerror.DB, "sqlite: rebalance txn commit failed.")
 	}
 
